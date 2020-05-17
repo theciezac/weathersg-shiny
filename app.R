@@ -4,25 +4,22 @@ library(jsonlite)
 library(dplyr)
 library(shiny)
 library(leaflet)
+library(htmltools)
 
+# Set environment of app to Singapore timezone for display of correct time on web page
 Sys.setenv(TZ="Asia/Singapore")
 
-# Initialise global variables
-# temp.api.status <- NULL
-# rainfall.api.status <- NULL
-# rh.api.status <- NULL
-# wind.dir.api.status <- NULL
-# wind.speed.api.status <- NULL
-# 
-# ref.temp.timestamp <- NULL
-# ref.rainfall.timestamp <- NULL
-# ref.rh.timestamp <- NULL
-# ref.wind.dir.timestamp <- NULL
-# ref.wind.speed.timestamp <- NULL
-# 
-# merge.df <- NULL
-# 
-# leaflet.map <- NULL
+# URL prefix of API calls
+url.prefix <- "https://api.data.gov.sg/v1/environment/"
+
+temp <- list("url.suffix" = "air-temperature")
+rainfall <- list("url.suffix" = "rainfall")
+humidity <- list("url.suffix" = "relative-humidity")
+wind.dir <- list("url.suffix" = "wind-direction")
+wind.speed <- list("url.suffix" = "wind-speed")
+
+
+# Vector of list of vector readings
 
 reformat.timestamp <- function(raw.timestamp) {
     split.ts <- strsplit(raw.timestamp, "T")
@@ -138,9 +135,63 @@ doLoad <- function () {
                                      paste0("Wind speed: ", merge.df$wind.speed, " knots<br/>"))
     )
     
-    leaflet.map <<- leaflet(data=merge.df, options=leafletOptions(minZoom=11)) %>% 
+    leaflet.mapAll <<- leaflet(data=merge.df, options=leafletOptions(minZoom=11)) %>% 
         addTiles() %>% 
         addMarkers(~longitude, ~latitude, popup=~label)
+    
+    leaflet.mapTemp <<- leaflet(data=merge.df[!is.na(merge.df$temp),], 
+                                options=leafletOptions(minZoom=11)) %>%
+        addTiles() %>%
+        addCircleMarkers(~longitude, ~latitude,
+                         radius = 5,
+                         weight = 3,
+                         color="black",
+                         fillColor = "red",
+                         fillOpacity = 1,
+                         stroke = TRUE,
+                         label=~htmlEscape(paste0(temp, "°C")), 
+                         labelOptions = labelOptions(noHide=TRUE))
+    
+    leaflet.mapRainfall <<- leaflet(data=merge.df[!is.na(merge.df$rainfall),], 
+                                    options=leafletOptions(minZoom=11)) %>%
+        addTiles() %>%
+        addCircleMarkers(~longitude, ~latitude,
+                         radius = 5,
+                         weight = 3,
+                         color="black",
+                         fillColor = "blue",
+                         fillOpacity = 1,
+                         stroke = TRUE,
+                         label=~htmlEscape(paste0(rainfall, "mm")), 
+                         labelOptions = labelOptions(noHide=TRUE))
+    
+    leaflet.mapRH <<- leaflet(data=merge.df[!is.na(merge.df$relative.humidity),], 
+                              options=leafletOptions(minZoom=11)) %>%
+        addTiles() %>%
+        addCircleMarkers(~longitude, ~latitude,
+                         radius = 5,
+                         weight = 3,
+                         color="black",
+                         fillColor = "blue",
+                         fillOpacity = 1,
+                         stroke = TRUE,
+                         label=~htmlEscape(paste0(relative.humidity, "%")), 
+                         labelOptions = labelOptions(noHide=TRUE))
+    
+    wind.icon <<- awesomeIcons(
+        icon = "arrow-alt-circle-up",
+        iconColor = "blue",
+        library = "fa"
+    )
+    
+    # leaflet.mapWind <<- leaflet(data=merge.df[(!is.na(merge.df$wind.dir) | 
+    #                                                !is.na(merge.df$wind.speed)),], 
+    #                           options=leafletOptions(minZoom=11)) %>%
+    #     addTiles() %>%
+    #     addMarkers(~longitude, ~latitude,
+    #                      icon = wind.icon
+    #                      label=~htmlEscape(paste0(wind.speed, " knots")), 
+    #                      labelOptions = labelOptions(noHide=TRUE))
     
     update.times <<- data.frame("type" = c("Temperature", "Rainfall", "Relative humidity", "Wind direction", "Wind speed"), "time" = c(ref.temp.timestamp, ref.rainfall.timestamp, ref.rh.timestamp, ref.wind.dir.timestamp, ref.wind.speed.timestamp))
     
@@ -165,17 +216,24 @@ ui <- fluidPage(
     fluidRow(
         column(3,
                wellPanel(
-                   div(align="center", actionButton("refresh", "Refresh"), br(), br()),
+                   div(align="center", actionButton("refresh", "Refresh"), br()),
                    div(class="side", align="center", htmlOutput("refreshTime"), br(),
                        "Last update times: ",
                        tableOutput("updateTime")),
                    # p(htmlOutput("updateTime")),
                    div(align="center", class="side", 
-                       p(align="center", "Times displayed are in Singapore time (GMT+8).", br(), 
+                       p(align="center", "Times displayed are in Singapore time.", br(), 
                          "Source: ", 
                          a(href="https://data.gov.sg/dataset/realtime-weather-readings", "data.gov.sg")))
                )),
-        column(9, leafletOutput("map"))
+        column(9, tabsetPanel(type= "tabs",
+                              tabPanel("All Stations", leafletOutput("plotAll")),
+                              tabPanel("Temperature", leafletOutput("plotTemp")),
+                              tabPanel("Rainfall", leafletOutput("plotRainfall")),
+                              tabPanel("Relative Humidity", leafletOutput("plotRH"))#,
+                              # tabPanel("Wind", leafletOutput("plotWind"))
+        ))
+        # column(9, leafletOutput("map"))
     )
 )
 
@@ -186,7 +244,11 @@ server <- function(input, output) {
     
     output$updateTime <- renderTable(update.times, hover=TRUE, spacing="xs", colnames=FALSE, na="Not available")
     
-    output$map <- renderLeaflet(leaflet.map)
+    output$plotAll <- renderLeaflet(leaflet.mapAll)
+    output$plotTemp <- renderLeaflet(leaflet.mapTemp)
+    output$plotRainfall <- renderLeaflet(leaflet.mapRainfall)
+    output$plotRH <- renderLeaflet(leaflet.mapRH)
+    # output$plotWind <- renderLeaflet(leaflet.mapWind)
     
     observeEvent(input$refresh, {
         doLoad()
@@ -194,7 +256,11 @@ server <- function(input, output) {
             HTML(paste("Last refreshed at", format(Sys.time(), "%d/%m/%Y %H:%M:%S")))
         })
         output$updateTime <- renderTable(update.times, hover=TRUE, spacing="xs", colnames=FALSE, na="Not available")
-        output$map <- renderLeaflet(leaflet.map)
+        output$plotAll <- renderLeaflet(leaflet.mapAll)
+        output$plotTemp <- renderLeaflet(leaflet.mapTemp)
+        output$plotRainfall <- renderLeaflet(leaflet.mapRainfall)
+        output$plotRH <- renderLeaflet(leaflet.mapRH)
+        # output$plotWind <- renderLeaflet(leaflet.mapWind)
     })
 }
 
